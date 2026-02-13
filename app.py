@@ -86,14 +86,22 @@ def process_webcam_frame(detector: FaceDetector, frame_placeholder, table_placeh
     """Process a single webcam frame. Called on each Streamlit rerun."""
     global _webcam_cap
     
-    if _webcam_cap is None:
-        _webcam_cap = cv2.VideoCapture(0)
-        if not _webcam_cap.isOpened():
-            st.error("Could not open webcam. Please check your camera permissions.")
-            st.session_state["running_webcam"] = False
-            _webcam_cap = None
-            return
-        st.session_state["webcam_frame_index"] = 0
+    try:
+        if _webcam_cap is None:
+            _webcam_cap = cv2.VideoCapture(0)
+            if not _webcam_cap.isOpened():
+                st.error("Could not open webcam. Webcam access may not be available in this environment.")
+                st.info("💡 Tip: Use 'Uploaded Video' mode instead for cloud deployments.")
+                st.session_state["running_webcam"] = False
+                _webcam_cap = None
+                return
+            st.session_state["webcam_frame_index"] = 0
+    except Exception as e:
+        st.error(f"Error accessing webcam: {str(e)}")
+        st.info("💡 Tip: Webcam is not available in Streamlit Cloud. Please use 'Uploaded Video' mode.")
+        st.session_state["running_webcam"] = False
+        _webcam_cap = None
+        return
     
     frame_index = st.session_state.get("webcam_frame_index", 0)
     records: List[DetectionRecord] = st.session_state["records"]
@@ -217,11 +225,16 @@ def run_uploaded_video(detector: FaceDetector, uploaded_file, max_frames: int) -
 
 
 def main() -> None:
-    st.set_page_config(
-        page_title="Real-Time Face Detection Dashboard",
-        layout="wide",
-        page_icon="👁️",
-    )
+    try:
+        st.set_page_config(
+            page_title="Real-Time Face Detection Dashboard",
+            layout="wide",
+            page_icon="👁️",
+        )
+    except Exception:
+        # Page config already set, ignore
+        pass
+    
     _init_session_state()
 
     st.title("Real-Time AI Head & Face Detection Dashboard")
@@ -238,11 +251,21 @@ This dashboard implements **AI-powered head and face detection** optimized for e
     )
 
     config = _build_sidebar()
-    detector = FaceDetector(
-        model_type=config["model_type"],
-        confidence=config["confidence"],
-        head_detection_mode=config["head_detection_mode"],
-    )
+    
+    try:
+        detector = FaceDetector(
+            model_type=config["model_type"],
+            confidence=config["confidence"],
+            head_detection_mode=config["head_detection_mode"],
+        )
+    except Exception as e:
+        st.error(f"Error initializing detector: {str(e)}")
+        st.info("Falling back to Haar cascade model.")
+        detector = FaceDetector(
+            model_type="haar",
+            confidence=config["confidence"],
+            head_detection_mode=False,
+        )
 
     st.markdown("### 1. Live Video Panel")
 
@@ -253,11 +276,15 @@ This dashboard implements **AI-powered head and face detection** optimized for e
 
     # Clean up webcam if switching to video source
     global _webcam_cap
-    if config["source"] == "Uploaded Video" and st.session_state.get("running_webcam", False):
-        st.session_state["running_webcam"] = False
-        if _webcam_cap is not None:
-            _webcam_cap.release()
-            _webcam_cap = None
+    try:
+        if config["source"] == "Uploaded Video" and st.session_state.get("running_webcam", False):
+            st.session_state["running_webcam"] = False
+            if _webcam_cap is not None:
+                _webcam_cap.release()
+                _webcam_cap = None
+    except Exception:
+        # Ignore cleanup errors
+        _webcam_cap = None
     
     controls_col, _ = st.columns([1, 2])
     with controls_col:
@@ -270,8 +297,11 @@ This dashboard implements **AI-powered head and face detection** optimized for e
                 st.session_state["running_webcam"] = True
                 st.session_state["records"] = []
                 # Clean up old webcam if exists
-                if _webcam_cap is not None:
-                    _webcam_cap.release()
+                try:
+                    if _webcam_cap is not None:
+                        _webcam_cap.release()
+                        _webcam_cap = None
+                except Exception:
                     _webcam_cap = None
                 st.session_state["webcam_frame_index"] = 0
                 st.rerun()
@@ -279,8 +309,11 @@ This dashboard implements **AI-powered head and face detection** optimized for e
             if st.button("Stop Webcam", disabled=not st.session_state["running_webcam"]):
                 st.session_state["running_webcam"] = False
                 # Clean up webcam
-                if _webcam_cap is not None:
-                    _webcam_cap.release()
+                try:
+                    if _webcam_cap is not None:
+                        _webcam_cap.release()
+                        _webcam_cap = None
+                except Exception:
                     _webcam_cap = None
                 if "webcam_frame_index" in st.session_state:
                     del st.session_state["webcam_frame_index"]
@@ -323,5 +356,9 @@ This dashboard implements **AI-powered head and face detection** optimized for e
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        st.error(f"An error occurred: {str(e)}")
+        st.exception(e)
 
